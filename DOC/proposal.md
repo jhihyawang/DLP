@@ -1,0 +1,3 @@
+我大概想了一下架構，主軸環繞在原文中的paint 
+原文中的paint使用condition-diffution model 並且使用輸入影像和文字prompt作為條件，
+而我們的差異則是多加上bbox作為條件之一，其中bbox的條件有三種方法作為proposal的idea，我有把大致的內容先貼在簡報上，把這幾頁轉換成圖片的形式應該就差不多了，另外dataset應該就使用原文製作的PIPE資料集

@@ -1,0 +1,2 @@
+step,epoch,loss,metric,learning_rate
+1,1,0.5391167402267456,,5e-05

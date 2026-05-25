@@ -1,0 +1,33 @@
+# Python cache / local runtime
+__pycache__/
+*.py[cod]
+.ipynb_checkpoints/
+
+# Local environments
+.env
+.venv/
+venv/
+env/
+
+# Large dataset and model caches. Recreate via scripts/download_pipe_data.py.
+data/
+download/
+
+# Training checkpoints are too large for normal GitHub commits.
+checkpoints/
+
+# Runtime logs. Keep metrics CSV if useful, but do not commit large tmux/stdout logs.
+logs/*.log
+
+# Generated images: ignore the full result tree by default, then keep compact
+# comparison figures that are useful for teammate review and reports.
+results/**
+!results/
+!results/bbox_corner_compare/
+!results/bbox_corner_compare/*.png
+!results/bbox_spoon_compare/
+!results/bbox_spoon_compare/*.png
+
+# Local outputs / submissions
+outputs/
+

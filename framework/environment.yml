@@ -1,0 +1,22 @@
+name: dlp-pipe
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.11
+  - pip
+  - datasets
+  - pillow
+  - tqdm
+  - requests
+  - pip:
+      - --index-url https://download.pytorch.org/whl/cu128
+      - torch
+      - torchvision
+      - --extra-index-url https://pypi.org/simple
+      - diffusers==0.37.1
+      - transformers
+      - accelerate
+      - peft
+      - safetensors==0.7.0
+      - fsspec[http]==2026.2.0
