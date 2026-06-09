@@ -36,6 +36,11 @@ def load_pipe_masks_split(split):
     return load_dataset("paint-by-inpaint/PIPE_Masks", split=split, cache_dir=str(HF_CACHE))
 
 
+def load_magicbrush_split(split, dataset_name="osunlp/MagicBrush"):
+    configure_huggingface_cache()
+    return load_dataset(dataset_name, split=split, cache_dir=str(HF_CACHE))
+
+
 def build_mask_index(mask_dataset):
     # Column access avoids decoding the mask images while building the index.
     return {
@@ -63,6 +68,23 @@ def bbox_to_mask(bbox, size):
     if x2 > x1 and y2 > y1:
         mask.paste(255, (x1, y1, x2, y2))
     return mask
+
+
+def diff_to_mask(source_img, target_img, threshold=16):
+    source = source_img.convert("RGB")
+    target = target_img.convert("RGB")
+    diff = Image.new("L", source.size, 0)
+    source_pixels = source.load()
+    target_pixels = target.load()
+    diff_pixels = diff.load()
+    width, height = source.size
+    for y in range(height):
+        for x in range(width):
+            sr, sg, sb = source_pixels[x, y]
+            tr, tg, tb = target_pixels[x, y]
+            if (abs(sr - tr) + abs(sg - tg) + abs(sb - tb)) / 3 > threshold:
+                diff_pixels[x, y] = 255
+    return diff
 
 
 def choose_instruction(sample):
@@ -143,6 +165,96 @@ class PIPEBBoxDataset(Dataset):
             "img_id": sample["img_id"],
             "ann_id": sample["ann_id"],
         }
+
+
+class MagicBrushBBoxDataset(Dataset):
+    def __init__(
+        self,
+        split="dev",
+        dataset_name="osunlp/MagicBrush",
+        magicbrush_dataset=None,
+        image_size=512,
+        image_transform=to_tensor,
+        mask_transform=to_tensor,
+    ):
+        self.split = split
+        self.dataset_name = dataset_name
+        self.dataset = (
+            magicbrush_dataset
+            if magicbrush_dataset is not None
+            else load_magicbrush_split(split, dataset_name)
+        )
+        self.image_size = image_size
+        self.image_transform = image_transform
+        self.mask_transform = mask_transform
+
+    def __len__(self):
+        return len(self.dataset)
+
+    def __getitem__(self, idx):
+        sample = self.dataset[idx]
+        source_img = sample["source_img"].convert("RGB")
+        target_img = sample["target_img"].convert("RGB")
+        mask_img = sample.get("mask_img")
+        object_mask = (
+            binarize_mask(mask_img)
+            if mask_img is not None
+            else diff_to_mask(source_img, target_img)
+        )
+
+        if self.image_size is not None:
+            size = (self.image_size, self.image_size)
+            source_img = source_img.resize(size, Image.BICUBIC)
+            target_img = target_img.resize(size, Image.BICUBIC)
+            object_mask = object_mask.resize(size, Image.NEAREST)
+
+        bbox = mask_to_bbox(object_mask)
+        bbox_mask = bbox_to_mask(bbox, source_img.size)
+
+        if self.image_transform is not None:
+            source_img = self.image_transform(source_img).contiguous().clone()
+            target_img = self.image_transform(target_img).contiguous().clone()
+
+        if self.mask_transform is not None:
+            object_mask = self.mask_transform(object_mask).contiguous().clone()
+            bbox_mask = self.mask_transform(bbox_mask).contiguous().clone()
+
+        img_id = sample.get("img_id", idx)
+        turn_index = sample.get("turn_index", 0)
+        return {
+            "source_img": source_img,
+            "target_img": target_img,
+            "object_mask": object_mask,
+            "bbox_mask": bbox_mask,
+            "bbox": torch.tensor(bbox, dtype=torch.float32),
+            "instruction": sample.get("instruction", ""),
+            "instruction_vlm_llm": sample.get("instruction", ""),
+            "instruction_class": "",
+            "instruction_ref": "",
+            "object_location": "",
+            "target_img_dataset": "osunlp/MagicBrush",
+            "img_id": img_id,
+            "ann_id": turn_index,
+            "turn_index": turn_index,
+            "dataset_name": self.dataset_name,
+        }
+
+
+def create_bbox_dataset(
+    dataset_name="pipe",
+    split=None,
+    image_size=512,
+    magicbrush_dataset_name="osunlp/MagicBrush",
+):
+    if dataset_name == "pipe":
+        return PIPEBBoxDataset(split=split or "test", image_size=image_size)
+    if dataset_name == "magicbrush":
+        return MagicBrushBBoxDataset(
+            split=split or "dev",
+            image_size=image_size,
+            dataset_name=magicbrush_dataset_name,
+        )
+    raise ValueError(f"Unknown dataset_name: {dataset_name}")
 
 
 def pipe_bbox_collate(batch):

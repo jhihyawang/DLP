@@ -33,10 +33,10 @@ def count_parameters(module, trainable_only=False):
     return sum(param.numel() for param in params)
 
 
-def create_bbox_controlnet(unet, dtype=torch.float16):
+def create_bbox_controlnet(unet, dtype=torch.float16, conditioning_channels=1):
     controlnet = ControlNetModel.from_unet(
         unet,
-        conditioning_channels=1,
+        conditioning_channels=conditioning_channels,
         load_weights_from_unet=True,
     )
     controlnet.to(device=unet.device, dtype=dtype)
@@ -47,6 +47,7 @@ def load_strategy_c_pipeline(
     model_name=DEFAULT_MODEL_NAME,
     device="cuda",
     dtype=torch.float16,
+    conditioning_channels=1,
 ):
     MODEL_CACHE.mkdir(parents=True, exist_ok=True)
 
@@ -67,6 +68,10 @@ def load_strategy_c_pipeline(
     freeze_module(pipe.unet)
 
     pipe.to(device)
-    controlnet = create_bbox_controlnet(pipe.unet, dtype=dtype)
+    controlnet = create_bbox_controlnet(
+        pipe.unet,
+        dtype=dtype,
+        conditioning_channels=conditioning_channels,
+    )
     controlnet.train()
     return pipe, controlnet

@@ -1,0 +1,24 @@
+Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads.
+Loading pipeline components...:   0%|          | 0/6 [00:00<?, ?it/s]
+Loading weights:   0%|          | 0/196 [00:00<?, ?it/s][ALoading weights: 100%|██████████| 196/196 [00:00<00:00, 7193.34it/s]
+Loading pipeline components...:  50%|█████     | 3/6 [00:00<00:00, 27.08it/s]Loading pipeline components...: 100%|██████████| 6/6 [00:00<00:00, 12.00it/s]Loading pipeline components...: 100%|██████████| 6/6 [00:00<00:00, 13.09it/s]
+You have disabled the safety checker for <class 'diffusers.pipelines.stable_diffusion.pipeline_stable_diffusion_instruct_pix2pix.StableDiffusionInstructPix2PixPipeline'> by passing `safety_checker=None`. Ensure that you abide to the conditions of the Stable Diffusion license and do not expose unfiltered results in services or applications open to the public. Both the diffusers team and Hugging Face strongly recommend to keep the safety filter enabled in all public facing circumstances, disabling it only for use-cases that involve analyzing network behavior or auditing its results. For more information, please have a look at https://github.com/huggingface/diffusers/pull/254 .
+prompt: Add a metallic spoon
+grid: results/fixed_location_ablation/strategy_c_top-left_ablation/strategy_c_final_epoch_0010_step_002560_test_0_seed1234_grid.png
+baseline: results/fixed_location_ablation/strategy_c_top-left_ablation/strategy_c_final_epoch_0010_step_002560_test_0_seed1234_baseline.png
+Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads.
+Loading pipeline components...:   0%|          | 0/6 [00:00<?, ?it/s]Loading pipeline components...:  17%|█▋        | 1/6 [00:00<00:01,  3.33it/s]
+Loading weights:   0%|          | 0/196 [00:00<?, ?it/s][ALoading weights: 100%|██████████| 196/196 [00:00<00:00, 6273.34it/s]
+Loading pipeline components...: 100%|██████████| 6/6 [00:00<00:00, 15.52it/s]Loading pipeline components...: 100%|██████████| 6/6 [00:00<00:00, 13.11it/s]
+You have disabled the safety checker for <class 'diffusers.pipelines.stable_diffusion.pipeline_stable_diffusion_instruct_pix2pix.StableDiffusionInstructPix2PixPipeline'> by passing `safety_checker=None`. Ensure that you abide to the conditions of the Stable Diffusion license and do not expose unfiltered results in services or applications open to the public. Both the diffusers team and Hugging Face strongly recommend to keep the safety filter enabled in all public facing circumstances, disabling it only for use-cases that involve analyzing network behavior or auditing its results. For more information, please have a look at https://github.com/huggingface/diffusers/pull/254 .
+prompt: Add a striped cat with gray and white fur, blue eyes, and a collar with a tag
+grid: results/fixed_location_ablation/strategy_c_top-left_ablation/strategy_c_final_epoch_0010_step_002560_test_1_seed1234_grid.png
+baseline: results/fixed_location_ablation/strategy_c_top-left_ablation/strategy_c_final_epoch_0010_step_002560_test_1_seed1234_baseline.png
+Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads.
+Loading pipeline components...:   0%|          | 0/6 [00:00<?, ?it/s]
+Loading weights:   0%|          | 0/196 [00:00<?, ?it/s][ALoading weights: 100%|██████████| 196/196 [00:00<00:00, 7214.17it/s]
+Loading pipeline components...:  33%|███▎      | 2/6 [00:00<00:00,  5.38it/s]Loading pipeline components...: 100%|██████████| 6/6 [00:00<00:00, 13.19it/s]
+You have disabled the safety checker for <class 'diffusers.pipelines.stable_diffusion.pipeline_stable_diffusion_instruct_pix2pix.StableDiffusionInstructPix2PixPipeline'> by passing `safety_checker=None`. Ensure that you abide to the conditions of the Stable Diffusion license and do not expose unfiltered results in services or applications open to the public. Both the diffusers team and Hugging Face strongly recommend to keep the safety filter enabled in all public facing circumstances, disabling it only for use-cases that involve analyzing network behavior or auditing its results. For more information, please have a look at https://github.com/huggingface/diffusers/pull/254 .
+prompt: Add a person in a yellow vest
+grid: results/fixed_location_ablation/strategy_c_top-left_ablation/strategy_c_final_epoch_0010_step_002560_test_2_seed1234_grid.png
+baseline: results/fixed_location_ablation/strategy_c_top-left_ablation/strategy_c_final_epoch_0010_step_002560_test_2_seed1234_baseline.png

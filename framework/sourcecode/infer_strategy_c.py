@@ -16,7 +16,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from sourcecode.model.modelC import DEFAULT_MODEL_NAME, MODEL_CACHE, create_bbox_controlnet
-from sourcecode.pipe_bbox_dataset import PIPEBBoxDataset
+from sourcecode.pipe_bbox_dataset import create_bbox_dataset
 
 
 DATA_DISK = Path("/media/zia/88d6caf3-71f2-49cd-b054-48a1711c5def")
@@ -49,14 +49,18 @@ def load_pipeline(model_name, device, dtype):
     return pipe
 
 
-def load_controlnet(pipe, checkpoint_dir, checkpoint_tag, device, dtype):
+def load_controlnet(pipe, checkpoint_dir, checkpoint_tag, device, dtype, conditioning_channels=1):
     if checkpoint_tag:
         controlnet_dir = Path(checkpoint_dir) / f"strategy_c_{checkpoint_tag}_controlnet"
         if not controlnet_dir.exists():
             raise FileNotFoundError(controlnet_dir)
         controlnet = ControlNetModel.from_pretrained(controlnet_dir, torch_dtype=dtype)
     else:
-        controlnet = create_bbox_controlnet(pipe.unet, dtype=dtype)
+        controlnet = create_bbox_controlnet(
+            pipe.unet,
+            dtype=dtype,
+            conditioning_channels=conditioning_channels,
+        )
 
     controlnet.to(device=device, dtype=dtype)
     controlnet.eval()
@@ -113,6 +117,46 @@ def bbox_to_mask_tensor(bbox, image_size):
     if x2 > x1 and y2 > y1:
         mask[:, y1:y2, x1:x2] = 1.0
     return mask
+
+
+def expand_bbox(bbox, padding, image_size):
+    if padding <= 0:
+        return clamp_bbox(bbox, image_size)
+    x1, y1, x2, y2 = [int(round(v)) for v in bbox]
+    return clamp_bbox((x1 - padding, y1 - padding, x2 + padding, y2 + padding), image_size)
+
+
+def bbox_to_soft_padding_mask_tensor(bbox, padding, image_size):
+    if padding <= 0:
+        return bbox_to_mask_tensor(bbox, image_size)
+
+    width, height = image_size
+    inner = clamp_bbox(bbox, image_size)
+    outer = expand_bbox(inner, padding, image_size)
+    x1, y1, x2, y2 = inner
+    ox1, oy1, ox2, oy2 = outer
+    mask = torch.zeros(1, height, width, dtype=torch.float32)
+    if ox2 <= ox1 or oy2 <= oy1:
+        return mask
+
+    yy = torch.arange(height, dtype=torch.float32).view(height, 1)
+    xx = torch.arange(width, dtype=torch.float32).view(1, width)
+    dx = torch.maximum(torch.maximum(x1 - xx, xx - (x2 - 1)), torch.zeros_like(xx))
+    dy = torch.maximum(torch.maximum(y1 - yy, yy - (y2 - 1)), torch.zeros_like(yy))
+    distance = torch.maximum(dx, dy)
+    soft = (1.0 - distance / float(padding)).clamp(0.0, 1.0)
+    soft[:, :ox1] = 0.0
+    soft[:, ox2:] = 0.0
+    soft[:oy1, :] = 0.0
+    soft[oy2:, :] = 0.0
+    mask[0] = soft
+    return mask
+
+
+def bbox_to_inner_outer_mask_tensor(bbox, outer_padding, image_size):
+    inner = bbox_to_mask_tensor(bbox, image_size)
+    outer = bbox_to_mask_tensor(expand_bbox(bbox, outer_padding, image_size), image_size)
+    return torch.cat([inner, outer], dim=0)
 
 
 def draw_bbox_overlay(image, bbox, color=(255, 0, 0), alpha=100):
@@ -215,7 +259,28 @@ def make_vertical_bbox_sweep(original_bbox, image_size):
     }
 
 
+def make_ablation_bbox_sweep(original_bbox, image_size):
+    width, height = image_size
+    x1, y1, x2, y2 = clamp_bbox(original_bbox, image_size)
+    box_w = max(1, x2 - x1)
+    box_h = max(1, y2 - y1)
+    return {
+        "zero": (0, 0, 0, 0),
+        "top_left": move_bbox_to_center(original_bbox, box_w / 2, box_h / 2, image_size),
+        "center": move_bbox_to_center(original_bbox, width * 0.5, height * 0.5, image_size),
+        "bottom_right": move_bbox_to_center(
+            original_bbox,
+            width - box_w / 2,
+            height - box_h / 2,
+            image_size,
+        ),
+        "original": clamp_bbox(original_bbox, image_size),
+    }
+
+
 def select_bbox_sweep(original_bbox, image_size, mode):
+    if mode == "ablation":
+        return make_ablation_bbox_sweep(original_bbox, image_size)
     if mode == "small-corners":
         return make_small_corner_bbox_sweep(original_bbox, image_size)
     if mode == "vertical":
@@ -308,7 +373,9 @@ def parse_args():
     parser.add_argument("--model-name", default=DEFAULT_MODEL_NAME)
     parser.add_argument("--checkpoint-dir", default=str(DEFAULT_CHECKPOINT_DIR))
     parser.add_argument("--checkpoint-tag", default=None)
-    parser.add_argument("--split", default="test", choices=["train", "test"])
+    parser.add_argument("--dataset-name", default="pipe", choices=["pipe", "magicbrush"])
+    parser.add_argument("--magicbrush-dataset", default="osunlp/MagicBrush")
+    parser.add_argument("--split", default=None)
     parser.add_argument("--index", type=int, default=0)
     parser.add_argument("--image-size", type=int, default=512)
     parser.add_argument("--prompt", default=None)
@@ -321,11 +388,31 @@ def parse_args():
     parser.add_argument("--device", default="cuda")
     parser.add_argument("--fp32", action="store_true")
     parser.add_argument("--no-baseline", action="store_true")
+    parser.add_argument(
+        "--control-conditioning-mode",
+        default="bbox",
+        choices=["bbox", "inner-outer"],
+    )
+    parser.add_argument("--outer-bbox-padding", type=int, default=24)
     parser.add_argument("--bbox-sweep", action="store_true")
+    parser.add_argument(
+        "--bbox-padding-sweep",
+        nargs="*",
+        type=int,
+        default=None,
+        help="Run original bbox with each listed padding value, e.g. 0 16 32 48.",
+    )
+    parser.add_argument(
+        "--bbox-soft-padding-sweep",
+        nargs="*",
+        type=int,
+        default=None,
+        help="Run original bbox with soft falloff padding values, e.g. 0 16 32 48.",
+    )
     parser.add_argument(
         "--bbox-sweep-mode",
         default="corners",
-        choices=["corners", "small-corners", "vertical"],
+        choices=["corners", "small-corners", "vertical", "ablation"],
     )
     return parser.parse_args()
 
@@ -342,13 +429,20 @@ def main():
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    dataset = PIPEBBoxDataset(split=args.split, image_size=args.image_size)
+    dataset = create_bbox_dataset(
+        dataset_name=args.dataset_name,
+        split=args.split,
+        image_size=args.image_size,
+        magicbrush_dataset_name=args.magicbrush_dataset,
+    )
+    split_label = args.split or ("dev" if args.dataset_name == "magicbrush" else "test")
     sample = dataset[args.index]
     prompt = args.prompt or sample["instruction"]
     source_pil = tensor_to_pil(sample["source_img"])
     target_pil = tensor_to_pil(sample["target_img"])
     source_batch = sample["source_img"].unsqueeze(0)
 
+    conditioning_channels = 2 if args.control_conditioning_mode == "inner-outer" else 1
     pipe = load_pipeline(args.model_name, args.device, dtype)
     controlnet = load_controlnet(
         pipe,
@@ -356,6 +450,7 @@ def main():
         args.checkpoint_tag,
         args.device,
         dtype,
+        conditioning_channels=conditioning_channels,
     )
 
     baseline_output = None
@@ -371,14 +466,49 @@ def main():
             generator=generator,
         ).images[0]
 
-    boxes = (
-        select_bbox_sweep(sample["bbox"].tolist(), source_pil.size, args.bbox_sweep_mode)
-        if args.bbox_sweep
-        else {"original": sample["bbox"].tolist()}
-    )
+    use_soft_padding = args.bbox_soft_padding_sweep is not None
+    if use_soft_padding:
+        boxes = {
+            f"soft_pad_{padding:03d}": expand_bbox(
+                sample["bbox"].tolist(),
+                padding,
+                source_pil.size,
+            )
+            for padding in args.bbox_soft_padding_sweep
+        }
+        mask_boxes = {
+            f"soft_pad_{padding:03d}": sample["bbox"].tolist()
+            for padding in args.bbox_soft_padding_sweep
+        }
+        padding_by_name = {
+            f"soft_pad_{padding:03d}": padding
+            for padding in args.bbox_soft_padding_sweep
+        }
+    elif args.bbox_padding_sweep is not None:
+        boxes = {
+            f"pad_{padding:03d}": expand_bbox(
+                sample["bbox"].tolist(),
+                padding,
+                source_pil.size,
+            )
+            for padding in args.bbox_padding_sweep
+        }
+        mask_boxes = boxes
+        padding_by_name = {}
+    elif args.bbox_sweep:
+        boxes = select_bbox_sweep(sample["bbox"].tolist(), source_pil.size, args.bbox_sweep_mode)
+        mask_boxes = boxes
+        padding_by_name = {}
+    else:
+        boxes = {"original": sample["bbox"].tolist()}
+        mask_boxes = boxes
+        padding_by_name = {}
 
     checkpoint_label = args.checkpoint_tag or "untrained_controlnet"
-    stem = f"strategy_c_{checkpoint_label}_{args.split}_{args.index}_seed{args.seed}"
+    stem = (
+        f"strategy_c_{checkpoint_label}_{args.dataset_name}_{split_label}_"
+        f"{args.index}_seed{args.seed}"
+    )
     paths = {
         "source": output_dir / f"{stem}_source.png",
         "target": output_dir / f"{stem}_target.png",
@@ -396,7 +526,20 @@ def main():
         grid_labels.append("baseline")
 
     for name, bbox in boxes.items():
-        bbox_mask = bbox_to_mask_tensor(bbox, source_pil.size)
+        if use_soft_padding:
+            bbox_mask = bbox_to_soft_padding_mask_tensor(
+                mask_boxes[name],
+                padding_by_name[name],
+                source_pil.size,
+            )
+        elif args.control_conditioning_mode == "inner-outer":
+            bbox_mask = bbox_to_inner_outer_mask_tensor(
+                mask_boxes[name],
+                args.outer_bbox_padding,
+                source_pil.size,
+            )
+        else:
+            bbox_mask = bbox_to_mask_tensor(mask_boxes[name], source_pil.size)
         bbox_batch = bbox_mask.unsqueeze(0)
         output = generate_strategy_c(
             pipe,
@@ -430,8 +573,10 @@ def main():
 
     info = [
         f"model_name: {args.model_name}",
+        f"dataset_name: {args.dataset_name}",
+        f"magicbrush_dataset: {args.magicbrush_dataset}",
         f"checkpoint_tag: {args.checkpoint_tag}",
-        f"split: {args.split}",
+        f"split: {split_label}",
         f"index: {args.index}",
         f"img_id: {sample['img_id']}",
         f"ann_id: {sample['ann_id']}",
@@ -442,8 +587,12 @@ def main():
         f"guidance_scale: {args.guidance_scale}",
         f"image_guidance_scale: {args.image_guidance_scale}",
         f"controlnet_conditioning_scale: {args.controlnet_conditioning_scale}",
+        f"control_conditioning_mode: {args.control_conditioning_mode}",
+        f"outer_bbox_padding: {args.outer_bbox_padding}",
         f"bbox_sweep: {args.bbox_sweep}",
         f"bbox_sweep_mode: {args.bbox_sweep_mode}",
+        f"bbox_padding_sweep: {args.bbox_padding_sweep}",
+        f"bbox_soft_padding_sweep: {args.bbox_soft_padding_sweep}",
         f"grid: {paths['grid']}",
     ]
     paths["info"].write_text("\n".join(info) + "\n", encoding="utf-8")

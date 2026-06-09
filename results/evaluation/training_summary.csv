@@ -1,0 +1,6 @@
+run,metrics_csv,steps,epochs,final_loss,mean_loss,min_loss,max_loss,learning_rate
+strategy_b,logs/all_strategies_matched/strategy_b_metrics.csv,2560,10,0.084742970764637,0.32210895267394335,0.0008617254206910729,3.036588191986084,1e-05
+strategy_c,logs/all_strategies_matched/strategy_c_metrics.csv,2560,10,0.0252325888723135,0.2697132881125981,0.0011762055801227689,2.6472487449645996,1e-05
+strategy_cplus,logs/all_strategies_matched/strategy_cplus_metrics.csv,2560,10,0.017529156059026718,0.27234630405550886,0.0009074731497094035,2.4521026611328125,1e-05
+strategy_c_top-left_ablation,logs/fixed_location_ablation/strategy_c_top-left_ablation_metrics.csv,2560,10,0.030390001833438873,0.2725489578890574,0.0014004083350300789,2.3530118465423584,1e-05
+strategy_cplus_top-left_ablation,logs/fixed_location_ablation/strategy_cplus_top-left_ablation_metrics.csv,2560,10,0.05148700624704361,0.2721883135273174,0.0009715463384054601,2.374691963195801,1e-05

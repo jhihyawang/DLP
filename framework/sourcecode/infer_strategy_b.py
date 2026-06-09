@@ -12,7 +12,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from sourcecode.model.modelA import DEFAULT_MODEL_NAME, MODEL_CACHE
-from sourcecode.pipe_bbox_dataset import PIPEBBoxDataset
+from sourcecode.pipe_bbox_dataset import create_bbox_dataset
 
 
 DATA_DISK = Path("/media/zia/88d6caf3-71f2-49cd-b054-48a1711c5def")
@@ -331,7 +331,9 @@ def parse_args():
     parser.add_argument("--model-name", default=DEFAULT_MODEL_NAME)
     parser.add_argument("--checkpoint-dir", default=str(DEFAULT_CHECKPOINT_DIR))
     parser.add_argument("--checkpoint-tag", default=None)
-    parser.add_argument("--split", default="test", choices=["train", "test"])
+    parser.add_argument("--dataset-name", default="pipe", choices=["pipe", "magicbrush"])
+    parser.add_argument("--magicbrush-dataset", default="osunlp/MagicBrush")
+    parser.add_argument("--split", default=None)
     parser.add_argument("--index", type=int, default=0)
     parser.add_argument("--image-size", type=int, default=512)
     parser.add_argument("--prompt", default=None)
@@ -367,7 +369,13 @@ def main():
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    dataset = PIPEBBoxDataset(split=args.split, image_size=args.image_size)
+    dataset = create_bbox_dataset(
+        dataset_name=args.dataset_name,
+        split=args.split,
+        image_size=args.image_size,
+        magicbrush_dataset_name=args.magicbrush_dataset,
+    )
+    split_label = args.split or ("dev" if args.dataset_name == "magicbrush" else "test")
     sample = dataset[args.index]
     prompt = args.prompt or sample["instruction"]
 
@@ -393,7 +401,10 @@ def main():
         ).images[0]
 
     checkpoint_label = args.checkpoint_tag or "pretrained"
-    stem = f"strategy_b_{checkpoint_label}_{args.split}_{args.index}_seed{args.seed}"
+    stem = (
+        f"strategy_b_{checkpoint_label}_{args.dataset_name}_{split_label}_"
+        f"{args.index}_seed{args.seed}"
+    )
     paths = {
         "source": output_dir / f"{stem}_source.png",
         "target": output_dir / f"{stem}_target.png",
@@ -457,8 +468,10 @@ def main():
 
     info = [
         f"model_name: {args.model_name}",
+        f"dataset_name: {args.dataset_name}",
+        f"magicbrush_dataset: {args.magicbrush_dataset}",
         f"checkpoint_tag: {args.checkpoint_tag}",
-        f"split: {args.split}",
+        f"split: {split_label}",
         f"index: {args.index}",
         f"img_id: {sample['img_id']}",
         f"ann_id: {sample['ann_id']}",

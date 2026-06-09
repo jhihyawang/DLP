@@ -92,7 +92,54 @@ def random_shift_box(box, image_width, image_height, min_center_distance=64):
     return best_box
 
 
-def make_shifted_bbox_batch(source_img, target_img, object_mask, shift_prob):
+def place_box(box, image_width, image_height, placement, margin=16):
+    x1, y1, x2, y2 = box
+    box_w = x2 - x1
+    box_h = y2 - y1
+    if box_w <= 0 or box_h <= 0:
+        return box
+
+    max_x = max(0, image_width - box_w)
+    max_y = max(0, image_height - box_h)
+    margin_x = min(max(0, margin), max_x)
+    margin_y = min(max(0, margin), max_y)
+
+    if placement == "original":
+        new_x1, new_y1 = x1, y1
+    elif placement == "top-left":
+        new_x1, new_y1 = margin_x, margin_y
+    elif placement == "top-right":
+        new_x1, new_y1 = max(0, image_width - box_w - margin), margin_y
+    elif placement == "bottom-left":
+        new_x1, new_y1 = margin_x, max(0, image_height - box_h - margin)
+    elif placement == "bottom-right":
+        new_x1 = max(0, image_width - box_w - margin)
+        new_y1 = max(0, image_height - box_h - margin)
+    elif placement == "center":
+        new_x1 = int(round((image_width - box_w) / 2))
+        new_y1 = int(round((image_height - box_h) / 2))
+    else:
+        raise ValueError(f"Unknown bbox placement: {placement}")
+
+    new_x1 = max(0, min(max_x, int(new_x1)))
+    new_y1 = max(0, min(max_y, int(new_y1)))
+    return new_x1, new_y1, new_x1 + box_w, new_y1 + box_h
+
+
+def choose_new_box(box, image_width, image_height, placement, margin):
+    if placement == "random":
+        return random_shift_box(box, image_width, image_height)
+    return place_box(box, image_width, image_height, placement, margin)
+
+
+def make_shifted_bbox_batch(
+    source_img,
+    target_img,
+    object_mask,
+    shift_prob,
+    placement="random",
+    margin=16,
+):
     if shift_prob <= 0:
         return target_img, object_mask
 
@@ -110,10 +157,12 @@ def make_shifted_bbox_batch(source_img, target_img, object_mask, shift_prob):
             continue
 
         x1, y1, x2, y2 = box
-        new_x1, new_y1, new_x2, new_y2 = random_shift_box(
+        new_x1, new_y1, new_x2, new_y2 = choose_new_box(
             box,
             image_width,
             image_height,
+            placement,
+            margin,
         )
 
         crop_mask = object_mask[idx : idx + 1, :, y1:y2, x1:x2]
@@ -131,6 +180,53 @@ def make_shifted_bbox_batch(source_img, target_img, object_mask, shift_prob):
         shifted_mask[idx : idx + 1] = pseudo_mask
 
     return shifted_target, shifted_mask
+
+
+def bbox_to_mask_like(mask, box):
+    bbox_mask = torch.zeros_like(mask)
+    if box is None:
+        return bbox_mask
+    x1, y1, x2, y2 = box
+    if x2 > x1 and y2 > y1:
+        bbox_mask[..., y1:y2, x1:x2] = 1.0
+    return bbox_mask
+
+
+def expand_box(box, image_width, image_height, padding):
+    if box is None:
+        return None
+    x1, y1, x2, y2 = box
+    return (
+        max(0, x1 - padding),
+        max(0, y1 - padding),
+        min(image_width, x2 + padding),
+        min(image_height, y2 + padding),
+    )
+
+
+def make_bbox_mask_batch(object_mask, padding=0):
+    batch_size, _, image_height, image_width = object_mask.shape
+    bbox_mask = torch.zeros_like(object_mask)
+    for idx in range(batch_size):
+        box = mask_to_bbox(object_mask[idx, 0])
+        box = expand_box(box, image_width, image_height, padding)
+        bbox_mask[idx : idx + 1] = bbox_to_mask_like(object_mask[idx : idx + 1], box)
+    return bbox_mask
+
+
+def prepare_control_condition(object_mask, mode, outer_padding):
+    if mode == "object-mask":
+        return object_mask, object_mask
+
+    inner_bbox = make_bbox_mask_batch(object_mask, padding=0)
+    if mode == "bbox":
+        return inner_bbox, inner_bbox
+
+    if mode == "inner-outer":
+        outer_bbox = make_bbox_mask_batch(object_mask, padding=outer_padding)
+        return torch.cat([inner_bbox, outer_bbox], dim=1), inner_bbox
+
+    raise ValueError(f"Unknown control conditioning mode: {mode}")
 
 
 def make_latent_mask(mask, latent_shape, dtype):
@@ -181,6 +277,26 @@ def parse_args():
     parser.add_argument("--gradient-accumulation-steps", type=int, default=1)
     parser.add_argument("--bbox-loss-weight", type=float, default=8.0)
     parser.add_argument("--bbox-shift-prob", type=float, default=0.5)
+    parser.add_argument(
+        "--bbox-placement",
+        default="random",
+        choices=[
+            "random",
+            "original",
+            "top-left",
+            "top-right",
+            "bottom-left",
+            "bottom-right",
+            "center",
+        ],
+    )
+    parser.add_argument("--bbox-placement-margin", type=int, default=16)
+    parser.add_argument(
+        "--control-conditioning-mode",
+        default="object-mask",
+        choices=["object-mask", "bbox", "inner-outer"],
+    )
+    parser.add_argument("--outer-bbox-padding", type=int, default=24)
     parser.add_argument("--controlnet-conditioning-scale", type=float, default=1.0)
     parser.add_argument("--save-every", type=int, default=1)
     parser.add_argument("--seed", type=int, default=1234)
@@ -214,10 +330,12 @@ def main():
         collate_fn=pipe_bbox_collate,
     )
 
+    conditioning_channels = 2 if args.control_conditioning_mode == "inner-outer" else 1
     pipe, controlnet = load_strategy_c_pipeline(
         model_name=args.model_name,
         device=args.device,
         dtype=dtype,
+        conditioning_channels=conditioning_channels,
     )
 
     print(f"Frozen U-Net parameters: {count_parameters(pipe.unet):,}")
@@ -245,11 +363,18 @@ def main():
                 target_img = batch["target_img"].to(args.device, dtype=dtype)
                 object_mask = batch["object_mask"].to(args.device, dtype=dtype)
 
-                target_img, bbox_mask = make_shifted_bbox_batch(
+                target_img, object_condition_mask = make_shifted_bbox_batch(
                     source_img,
                     target_img,
                     object_mask,
                     args.bbox_shift_prob,
+                    args.bbox_placement,
+                    args.bbox_placement_margin,
+                )
+                controlnet_cond, loss_mask = prepare_control_condition(
+                    object_condition_mask,
+                    args.control_conditioning_mode,
+                    args.outer_bbox_padding,
                 )
 
                 with torch.no_grad():
@@ -275,7 +400,7 @@ def main():
                     model_input,
                     timesteps,
                     encoder_hidden_states=encoder_hidden_states,
-                    controlnet_cond=bbox_mask,
+                    controlnet_cond=controlnet_cond,
                     conditioning_scale=args.controlnet_conditioning_scale,
                     return_dict=False,
                 )
@@ -290,7 +415,7 @@ def main():
                 raw_loss = weighted_denoising_loss(
                     noise_pred,
                     noise,
-                    bbox_mask,
+                    loss_mask,
                     args.bbox_loss_weight,
                 )
                 if not torch.isfinite(raw_loss):
