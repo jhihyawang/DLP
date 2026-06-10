@@ -73,6 +73,8 @@ def bbox_to_mask(bbox, size):
 def diff_to_mask(source_img, target_img, threshold=16):
     source = source_img.convert("RGB")
     target = target_img.convert("RGB")
+    if target.size != source.size:
+        target = target.resize(source.size, Image.NEAREST)
     diff = Image.new("L", source.size, 0)
     source_pixels = source.load()
     target_pixels = target.load()
@@ -85,6 +87,28 @@ def diff_to_mask(source_img, target_img, threshold=16):
             if (abs(sr - tr) + abs(sg - tg) + abs(sb - tb)) / 3 > threshold:
                 diff_pixels[x, y] = 255
     return diff
+
+
+def mask_bbox_area_ratio(mask):
+    bbox = mask_to_bbox(mask)
+    x1, y1, x2, y2 = bbox
+    width, height = mask.size
+    if width <= 0 or height <= 0:
+        return 0.0
+    return max(0, x2 - x1) * max(0, y2 - y1) / float(width * height)
+
+
+def is_valid_mask(mask, min_bbox_area_ratio=0.0001, max_bbox_area_ratio=0.98):
+    ratio = mask_bbox_area_ratio(mask)
+    return min_bbox_area_ratio <= ratio <= max_bbox_area_ratio
+
+
+def choose_magicbrush_object_mask(source_img, target_img, mask_img=None):
+    if mask_img is not None:
+        object_mask = diff_to_mask(source_img, mask_img)
+        if is_valid_mask(object_mask):
+            return object_mask
+    return diff_to_mask(source_img, target_img)
 
 
 def choose_instruction(sample):
@@ -195,12 +219,7 @@ class MagicBrushBBoxDataset(Dataset):
         sample = self.dataset[idx]
         source_img = sample["source_img"].convert("RGB")
         target_img = sample["target_img"].convert("RGB")
-        mask_img = sample.get("mask_img")
-        object_mask = (
-            binarize_mask(mask_img)
-            if mask_img is not None
-            else diff_to_mask(source_img, target_img)
-        )
+        object_mask = choose_magicbrush_object_mask(source_img, target_img)
 
         if self.image_size is not None:
             size = (self.image_size, self.image_size)

@@ -220,6 +220,20 @@ def bbox_mask(bbox, shape):
     return mask
 
 
+def diff_bbox_from_tensors(source, target, threshold):
+    diff = (target - source).abs().mean(dim=0)
+    changed = diff > threshold
+    if changed.sum().item() == 0:
+        return (0, 0, 0, 0)
+    ys, xs = torch.nonzero(changed, as_tuple=True)
+    return (
+        int(xs.min().item()),
+        int(ys.min().item()),
+        int(xs.max().item()) + 1,
+        int(ys.max().item()) + 1,
+    )
+
+
 def expand_bbox(bbox, padding, image_size):
     x1, y1, x2, y2 = clamp_bbox(bbox, image_size)
     return clamp_bbox((x1 - padding, y1 - padding, x2 + padding, y2 + padding), image_size)
@@ -237,6 +251,15 @@ def crop_image(image, bbox):
     if x2 <= x1 or y2 <= y1:
         return None
     return image.crop((x1, y1, x2, y2))
+
+
+def resize_small_crop_for_lpips(image, min_size):
+    if image is None:
+        return None
+    width, height = image.size
+    if width >= min_size and height >= min_size:
+        return image
+    return image.resize((max(width, min_size), max(height, min_size)), Image.BICUBIC)
 
 
 def mse(a, b, mask):
@@ -315,7 +338,16 @@ def find_outputs(info_path):
     return sorted(candidates)
 
 
-def evaluate_output(info_path, output_path, threshold, outer_padding, evaluators):
+def evaluate_output(
+    info_path,
+    output_path,
+    threshold,
+    outer_padding,
+    evaluators,
+    bbox_source,
+    bbox_diff_threshold,
+    lpips_min_crop_size,
+):
     info = parse_info_file(info_path)
     source_path = info_path.with_name(info_path.name.replace("_info.txt", "_source.png"))
     target_path = info_path.with_name(info_path.name.replace("_info.txt", "_target.png"))
@@ -331,7 +363,11 @@ def evaluate_output(info_path, output_path, threshold, outer_padding, evaluators
 
     _, height, width = source.shape
     bbox_name, output_strategy = output_name_and_strategy(output_path)
-    bbox = bbox_for_name(info["bbox_xyxy"], (width, height), bbox_name)
+    if bbox_source == "source-target-diff":
+        original_bbox = diff_bbox_from_tensors(source, target, bbox_diff_threshold)
+    else:
+        original_bbox = info["bbox_xyxy"]
+    bbox = bbox_for_name(original_bbox, (width, height), bbox_name)
     inner_mask = bbox_mask(bbox, source.shape)
     outer_bbox = expand_bbox(bbox, outer_padding, (width, height))
     outer_mask = bbox_mask(outer_bbox, source.shape)
@@ -348,6 +384,7 @@ def evaluate_output(info_path, output_path, threshold, outer_padding, evaluators
         "index": info.get("index", ""),
         "prompt": info.get("prompt", ""),
         "bbox_xyxy": list(bbox),
+        "bbox_source": bbox_source,
         "threshold": threshold,
         "inside_output_target_l1": l1(output, target, inner_mask),
         "inside_output_target_mse": mse(output, target, inner_mask),
@@ -367,10 +404,13 @@ def evaluate_output(info_path, output_path, threshold, outer_padding, evaluators
     target_crop = crop_image(target_pil, bbox)
     source_crop = crop_image(source_pil, bbox)
     if output_crop is not None and target_crop is not None:
+        output_crop = resize_small_crop_for_lpips(output_crop, lpips_min_crop_size)
+        target_crop = resize_small_crop_for_lpips(target_crop, lpips_min_crop_size)
         row["lpips_output_target_inside_bbox"] = evaluators.lpips_distance(output_crop, target_crop)
     else:
         row["lpips_output_target_inside_bbox"] = float("nan")
     if output_crop is not None and source_crop is not None:
+        source_crop = resize_small_crop_for_lpips(source_crop, lpips_min_crop_size)
         row["lpips_output_source_inside_bbox"] = evaluators.lpips_distance(output_crop, source_crop)
     else:
         row["lpips_output_source_inside_bbox"] = float("nan")
@@ -419,6 +459,11 @@ def parse_args():
     parser.add_argument("--output-csv", default="results/evaluation/per_image_metrics.csv")
     parser.add_argument("--summary-csv", default="results/evaluation/summary_metrics.csv")
     parser.add_argument(
+        "--info-name-contains",
+        default=None,
+        help="Only evaluate info files whose filename contains this substring.",
+    )
+    parser.add_argument(
         "--change-threshold",
         type=float,
         default=0.08,
@@ -430,11 +475,33 @@ def parse_args():
         default=24,
         help="Padding used for outside-outer background preservation metrics.",
     )
+    parser.add_argument(
+        "--bbox-source",
+        choices=["info", "source-target-diff"],
+        default="info",
+        help=(
+            "Use bbox from info.txt, or recompute the original bbox from source-target "
+            "image difference. The diff mode is useful for diagnostic re-evaluation "
+            "of MagicBrush outputs generated with stale bbox metadata."
+        ),
+    )
+    parser.add_argument(
+        "--bbox-diff-threshold",
+        type=float,
+        default=0.08,
+        help="Mean RGB absolute difference threshold used by --bbox-source source-target-diff.",
+    )
     parser.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     parser.add_argument("--enable-clip", action="store_true")
     parser.add_argument("--clip-model", default="openai/clip-vit-base-patch32")
     parser.add_argument("--enable-lpips", action="store_true")
     parser.add_argument("--lpips-net", default="alex", choices=["alex", "vgg", "squeeze"])
+    parser.add_argument(
+        "--lpips-min-crop-size",
+        type=int,
+        default=64,
+        help="Resize bbox crops smaller than this size before inside-bbox LPIPS.",
+    )
     parser.add_argument(
         "--lpips-random-backbone",
         action="store_true",
@@ -452,6 +519,8 @@ def main():
     evaluators = OptionalEvaluators(args)
     rows = []
     for info_path in sorted(results_root.rglob("*_info.txt")):
+        if args.info_name_contains and args.info_name_contains not in info_path.name:
+            continue
         for output_path in find_outputs(info_path):
             rows.append(
                 evaluate_output(
@@ -460,6 +529,9 @@ def main():
                     threshold=args.change_threshold,
                     outer_padding=args.outer_padding,
                     evaluators=evaluators,
+                    bbox_source=args.bbox_source,
+                    bbox_diff_threshold=args.bbox_diff_threshold,
+                    lpips_min_crop_size=args.lpips_min_crop_size,
                 )
             )
 

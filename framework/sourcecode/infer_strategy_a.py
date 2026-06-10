@@ -339,6 +339,11 @@ def parse_args():
     parser.add_argument("--magicbrush-dataset", default="osunlp/MagicBrush")
     parser.add_argument("--split", default=None)
     parser.add_argument("--index", type=int, default=0)
+    parser.add_argument(
+        "--indices",
+        default=None,
+        help="Optional space/comma separated indices. Loads the model once and runs all indices.",
+    )
     parser.add_argument("--image-size", type=int, default=512)
     parser.add_argument("--prompt", default=None)
     parser.add_argument("--steps", type=int, default=50)
@@ -358,27 +363,14 @@ def parse_args():
     return parser.parse_args()
 
 
-def main():
-    args = parse_args()
-    configure_cache()
+def parse_indices(args):
+    if not args.indices:
+        return [args.index]
+    return [int(item) for item in args.indices.replace(",", " ").split()]
 
-    if args.device == "cuda" and not torch.cuda.is_available():
-        print("CUDA is not available; falling back to CPU.")
-        args.device = "cpu"
 
-    dtype = torch.float32 if args.fp32 or args.device == "cpu" else torch.float16
-    checkpoint_dir = Path(args.checkpoint_dir)
-    output_dir = Path(args.output_dir)
-    output_dir.mkdir(parents=True, exist_ok=True)
-
-    dataset = create_bbox_dataset(
-        dataset_name=args.dataset_name,
-        split=args.split,
-        image_size=args.image_size,
-        magicbrush_dataset_name=args.magicbrush_dataset,
-    )
-    split_label = args.split or ("dev" if args.dataset_name == "magicbrush" else "test")
-    sample = dataset[args.index]
+def run_one_index(args, dataset, split_label, output_dir, strategy_pipe, baseline_pipe, dtype, index):
+    sample = dataset[index]
     prompt = args.prompt or sample["instruction"]
 
     source_pil = tensor_to_pil(sample["source_img"])
@@ -390,8 +382,7 @@ def main():
     bbox_batch = sample["bbox_mask"].unsqueeze(0)
 
     baseline_output = None
-    if not args.no_baseline:
-        baseline_pipe = load_base_pipeline(args.model_name, args.device, dtype)
+    if baseline_pipe is not None:
         generator = torch.Generator(device=args.device).manual_seed(args.seed)
         baseline_output = baseline_pipe(
             prompt,
@@ -402,23 +393,11 @@ def main():
             num_images_per_prompt=1,
             generator=generator,
         ).images[0]
-        del baseline_pipe
-        if args.device == "cuda":
-            torch.cuda.empty_cache()
-
-    strategy_pipe = load_strategy_a_pipeline(
-        args.model_name,
-        checkpoint_dir,
-        args.step,
-        args.checkpoint_tag,
-        args.device,
-        dtype,
-    )
 
     checkpoint_label = args.checkpoint_tag or f"step{args.step:06d}"
     stem = (
         f"strategy_a_{checkpoint_label}_{args.dataset_name}_{split_label}_"
-        f"{args.index}_seed{args.seed}"
+        f"{index}_seed{args.seed}"
     )
     paths = {
         "source": output_dir / f"{stem}_source.png",
@@ -501,7 +480,7 @@ def main():
         f"checkpoint_step: {args.step}",
         f"checkpoint_tag: {args.checkpoint_tag}",
         f"split: {split_label}",
-        f"index: {args.index}",
+        f"index: {index}",
         f"img_id: {sample['img_id']}",
         f"ann_id: {sample['ann_id']}",
         f"bbox_xyxy: {sample['bbox'].tolist()}",
@@ -516,11 +495,48 @@ def main():
     ]
     paths["info"].write_text("\n".join(info) + "\n", encoding="utf-8")
 
+    print(f"index: {index}")
     print(f"prompt: {prompt}")
     print(f"grid: {paths['grid']}")
     print(f"strategy_a: {paths['strategy_a']}")
     if baseline_output is not None:
         print(f"baseline: {paths['baseline']}")
+
+
+def main():
+    args = parse_args()
+    configure_cache()
+
+    if args.device == "cuda" and not torch.cuda.is_available():
+        print("CUDA is not available; falling back to CPU.")
+        args.device = "cpu"
+
+    dtype = torch.float32 if args.fp32 or args.device == "cpu" else torch.float16
+    checkpoint_dir = Path(args.checkpoint_dir)
+    output_dir = Path(args.output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    dataset = create_bbox_dataset(
+        dataset_name=args.dataset_name,
+        split=args.split,
+        image_size=args.image_size,
+        magicbrush_dataset_name=args.magicbrush_dataset,
+    )
+    split_label = args.split or ("dev" if args.dataset_name == "magicbrush" else "test")
+    baseline_pipe = None
+    if not args.no_baseline:
+        baseline_pipe = load_base_pipeline(args.model_name, args.device, dtype)
+
+    strategy_pipe = load_strategy_a_pipeline(
+        args.model_name,
+        checkpoint_dir,
+        args.step,
+        args.checkpoint_tag,
+        args.device,
+        dtype,
+    )
+    for index in parse_indices(args):
+        run_one_index(args, dataset, split_label, output_dir, strategy_pipe, baseline_pipe, dtype, index)
 
 
 if __name__ == "__main__":

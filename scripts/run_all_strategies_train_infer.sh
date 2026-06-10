@@ -66,6 +66,7 @@ RUN_INFER="${RUN_INFER:-1}"
 RUN_BBOX_SWEEP="${RUN_BBOX_SWEEP:-0}"
 BBOX_SWEEP_MODE="${BBOX_SWEEP_MODE:-corners}"
 STRATEGIES="${STRATEGIES:-a b c cplus}"
+NO_BASELINE="${NO_BASELINE:-0}"
 
 mkdir -p "$CHECKPOINT_ROOT" "$RESULT_ROOT" "$LOG_ROOT"
 mkdir -p "$PIPE_HF_CACHE_DIR" "$PIPE_MODEL_CACHE_DIR" "$TMPDIR"
@@ -122,6 +123,11 @@ else
   FP32_INFER_FLAG=(--fp32)
 fi
 
+BASELINE_FLAG=()
+if [[ "$NO_BASELINE" == "1" ]]; then
+  BASELINE_FLAG=(--no-baseline)
+fi
+
 common_train_args=(
   --model-name "$MODEL_NAME"
   --max-train-samples "$MAX_TRAIN_SAMPLES"
@@ -155,6 +161,7 @@ common_infer_args=(
   --seed "$SEED"
   --device "$DEVICE"
   "${FP32_INFER_FLAG[@]}"
+  "${BASELINE_FLAG[@]}"
 )
 
 has_strategy() {
@@ -253,26 +260,24 @@ run_strategy_a_infer() {
   local tag
   tag="$(find_final_tag_strategy_a "$ckpt")"
   echo "== Infer Strategy A tag=$tag =="
-  for index in $RESOLVED_INDICES; do
+  "$PYTHON_BIN" framework/sourcecode/infer_strategy_a.py \
+    "${common_infer_args[@]}" \
+    --checkpoint-dir "$ckpt" \
+    --checkpoint-tag "$tag" \
+    --indices "$RESOLVED_INDICES" \
+    --output-dir "$RESULT_ROOT/strategy_a" \
+    2>&1 | tee -a "$LOG_ROOT/strategy_a_infer.log"
+  if [[ "$RUN_BBOX_SWEEP" == "1" ]]; then
     "$PYTHON_BIN" framework/sourcecode/infer_strategy_a.py \
       "${common_infer_args[@]}" \
       --checkpoint-dir "$ckpt" \
       --checkpoint-tag "$tag" \
-      --index "$index" \
-      --output-dir "$RESULT_ROOT/strategy_a" \
+      --indices "$RESOLVED_INDICES" \
+      --output-dir "$RESULT_ROOT/strategy_a_bbox_sweep" \
+      --bbox-sweep \
+      --bbox-sweep-mode "$BBOX_SWEEP_MODE" \
       2>&1 | tee -a "$LOG_ROOT/strategy_a_infer.log"
-    if [[ "$RUN_BBOX_SWEEP" == "1" ]]; then
-      "$PYTHON_BIN" framework/sourcecode/infer_strategy_a.py \
-        "${common_infer_args[@]}" \
-        --checkpoint-dir "$ckpt" \
-        --checkpoint-tag "$tag" \
-        --index "$index" \
-        --output-dir "$RESULT_ROOT/strategy_a_bbox_sweep" \
-        --bbox-sweep \
-        --bbox-sweep-mode "$BBOX_SWEEP_MODE" \
-        2>&1 | tee -a "$LOG_ROOT/strategy_a_infer.log"
-    fi
-  done
+  fi
 }
 
 run_strategy_b_infer() {
@@ -280,26 +285,24 @@ run_strategy_b_infer() {
   local tag
   tag="$(find_final_tag_from_dir "$ckpt" 'strategy_b_final_epoch_*_lora' 'strategy_b_' '_lora')"
   echo "== Infer Strategy B tag=$tag =="
-  for index in $RESOLVED_INDICES; do
+  "$PYTHON_BIN" framework/sourcecode/infer_strategy_b.py \
+    "${common_infer_args[@]}" \
+    --checkpoint-dir "$ckpt" \
+    --checkpoint-tag "$tag" \
+    --indices "$RESOLVED_INDICES" \
+    --output-dir "$RESULT_ROOT/strategy_b" \
+    2>&1 | tee -a "$LOG_ROOT/strategy_b_infer.log"
+  if [[ "$RUN_BBOX_SWEEP" == "1" ]]; then
     "$PYTHON_BIN" framework/sourcecode/infer_strategy_b.py \
       "${common_infer_args[@]}" \
       --checkpoint-dir "$ckpt" \
       --checkpoint-tag "$tag" \
-      --index "$index" \
-      --output-dir "$RESULT_ROOT/strategy_b" \
+      --indices "$RESOLVED_INDICES" \
+      --output-dir "$RESULT_ROOT/strategy_b_bbox_sweep" \
+      --bbox-sweep \
+      --bbox-sweep-mode "$BBOX_SWEEP_MODE" \
       2>&1 | tee -a "$LOG_ROOT/strategy_b_infer.log"
-    if [[ "$RUN_BBOX_SWEEP" == "1" ]]; then
-      "$PYTHON_BIN" framework/sourcecode/infer_strategy_b.py \
-        "${common_infer_args[@]}" \
-        --checkpoint-dir "$ckpt" \
-        --checkpoint-tag "$tag" \
-        --index "$index" \
-        --output-dir "$RESULT_ROOT/strategy_b_bbox_sweep" \
-        --bbox-sweep \
-        --bbox-sweep-mode "$BBOX_SWEEP_MODE" \
-        2>&1 | tee -a "$LOG_ROOT/strategy_b_infer.log"
-    fi
-  done
+  fi
 }
 
 run_strategy_c_infer() {
@@ -307,30 +310,28 @@ run_strategy_c_infer() {
   local tag
   tag="$(find_final_tag_from_dir "$ckpt" 'strategy_c_final_epoch_*_controlnet' 'strategy_c_' '_controlnet')"
   echo "== Infer Strategy C tag=$tag =="
-  for index in $RESOLVED_INDICES; do
+  "$PYTHON_BIN" framework/sourcecode/infer_strategy_c.py \
+    "${common_infer_args[@]}" \
+    --checkpoint-dir "$ckpt" \
+    --checkpoint-tag "$tag" \
+    --indices "$RESOLVED_INDICES" \
+    --output-dir "$RESULT_ROOT/strategy_c" \
+    --control-conditioning-mode bbox \
+    --controlnet-conditioning-scale "$CONTROLNET_CONDITIONING_SCALE" \
+    2>&1 | tee -a "$LOG_ROOT/strategy_c_infer.log"
+  if [[ "$RUN_BBOX_SWEEP" == "1" ]]; then
     "$PYTHON_BIN" framework/sourcecode/infer_strategy_c.py \
       "${common_infer_args[@]}" \
       --checkpoint-dir "$ckpt" \
       --checkpoint-tag "$tag" \
-      --index "$index" \
-      --output-dir "$RESULT_ROOT/strategy_c" \
+      --indices "$RESOLVED_INDICES" \
+      --output-dir "$RESULT_ROOT/strategy_c_bbox_sweep" \
       --control-conditioning-mode bbox \
       --controlnet-conditioning-scale "$CONTROLNET_CONDITIONING_SCALE" \
+      --bbox-sweep \
+      --bbox-sweep-mode "$BBOX_SWEEP_MODE" \
       2>&1 | tee -a "$LOG_ROOT/strategy_c_infer.log"
-    if [[ "$RUN_BBOX_SWEEP" == "1" ]]; then
-      "$PYTHON_BIN" framework/sourcecode/infer_strategy_c.py \
-        "${common_infer_args[@]}" \
-        --checkpoint-dir "$ckpt" \
-        --checkpoint-tag "$tag" \
-        --index "$index" \
-        --output-dir "$RESULT_ROOT/strategy_c_bbox_sweep" \
-        --control-conditioning-mode bbox \
-        --controlnet-conditioning-scale "$CONTROLNET_CONDITIONING_SCALE" \
-        --bbox-sweep \
-        --bbox-sweep-mode "$BBOX_SWEEP_MODE" \
-        2>&1 | tee -a "$LOG_ROOT/strategy_c_infer.log"
-    fi
-  done
+  fi
 }
 
 run_strategy_cplus_infer() {
@@ -338,32 +339,30 @@ run_strategy_cplus_infer() {
   local tag
   tag="$(find_final_tag_from_dir "$ckpt" 'strategy_c_final_epoch_*_controlnet' 'strategy_c_' '_controlnet')"
   echo "== Infer Strategy C+ tag=$tag =="
-  for index in $RESOLVED_INDICES; do
+  "$PYTHON_BIN" framework/sourcecode/infer_strategy_c.py \
+    "${common_infer_args[@]}" \
+    --checkpoint-dir "$ckpt" \
+    --checkpoint-tag "$tag" \
+    --indices "$RESOLVED_INDICES" \
+    --output-dir "$RESULT_ROOT/strategy_cplus" \
+    --control-conditioning-mode inner-outer \
+    --outer-bbox-padding "$OUTER_BBOX_PADDING" \
+    --controlnet-conditioning-scale "$CONTROLNET_CONDITIONING_SCALE" \
+    2>&1 | tee -a "$LOG_ROOT/strategy_cplus_infer.log"
+  if [[ "$RUN_BBOX_SWEEP" == "1" ]]; then
     "$PYTHON_BIN" framework/sourcecode/infer_strategy_c.py \
       "${common_infer_args[@]}" \
       --checkpoint-dir "$ckpt" \
       --checkpoint-tag "$tag" \
-      --index "$index" \
-      --output-dir "$RESULT_ROOT/strategy_cplus" \
+      --indices "$RESOLVED_INDICES" \
+      --output-dir "$RESULT_ROOT/strategy_cplus_bbox_sweep" \
       --control-conditioning-mode inner-outer \
       --outer-bbox-padding "$OUTER_BBOX_PADDING" \
       --controlnet-conditioning-scale "$CONTROLNET_CONDITIONING_SCALE" \
+      --bbox-sweep \
+      --bbox-sweep-mode "$BBOX_SWEEP_MODE" \
       2>&1 | tee -a "$LOG_ROOT/strategy_cplus_infer.log"
-    if [[ "$RUN_BBOX_SWEEP" == "1" ]]; then
-      "$PYTHON_BIN" framework/sourcecode/infer_strategy_c.py \
-        "${common_infer_args[@]}" \
-        --checkpoint-dir "$ckpt" \
-        --checkpoint-tag "$tag" \
-        --index "$index" \
-        --output-dir "$RESULT_ROOT/strategy_cplus_bbox_sweep" \
-        --control-conditioning-mode inner-outer \
-        --outer-bbox-padding "$OUTER_BBOX_PADDING" \
-        --controlnet-conditioning-scale "$CONTROLNET_CONDITIONING_SCALE" \
-        --bbox-sweep \
-        --bbox-sweep-mode "$BBOX_SWEEP_MODE" \
-        2>&1 | tee -a "$LOG_ROOT/strategy_cplus_infer.log"
-    fi
-  done
+  fi
 }
 
 if [[ "$RUN_TRAIN" == "1" ]]; then

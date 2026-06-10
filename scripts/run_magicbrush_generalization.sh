@@ -183,15 +183,13 @@ run_strategy_a() {
   local out="$RESULT_ROOT/strategy_a"
   mkdir -p "$out"
   echo "== MagicBrush Strategy A tag=$tag =="
-  for index in $RESOLVED_INDICES; do
-    "$PYTHON_BIN" framework/sourcecode/infer_strategy_a.py \
-      "${common_infer_args[@]}" \
-      --checkpoint-dir "$ckpt" \
-      --checkpoint-tag "$tag" \
-      --index "$index" \
-      --output-dir "$out" \
-      2>&1 | tee -a "$LOG_ROOT/strategy_a.log"
-  done
+  "$PYTHON_BIN" framework/sourcecode/infer_strategy_a.py \
+    "${common_infer_args[@]}" \
+    --checkpoint-dir "$ckpt" \
+    --checkpoint-tag "$tag" \
+    --indices "$RESOLVED_INDICES" \
+    --output-dir "$out" \
+    2>&1 | tee -a "$LOG_ROOT/strategy_a.log"
 }
 
 run_strategy_b() {
@@ -201,16 +199,14 @@ run_strategy_b() {
   local out="$RESULT_ROOT/strategy_b"
   mkdir -p "$out"
   echo "== MagicBrush Strategy B tag=$tag =="
-  for index in $RESOLVED_INDICES; do
-    "$PYTHON_BIN" framework/sourcecode/infer_strategy_b.py \
-      "${common_infer_args[@]}" \
-      --checkpoint-dir "$ckpt" \
-      --checkpoint-tag "$tag" \
-      --index "$index" \
-      --bbox-padding "$B_STRATEGY_BBOX_PADDING" \
-      --output-dir "$out" \
-      2>&1 | tee -a "$LOG_ROOT/strategy_b.log"
-  done
+  "$PYTHON_BIN" framework/sourcecode/infer_strategy_b.py \
+    "${common_infer_args[@]}" \
+    --checkpoint-dir "$ckpt" \
+    --checkpoint-tag "$tag" \
+    --indices "$RESOLVED_INDICES" \
+    --bbox-padding "$B_STRATEGY_BBOX_PADDING" \
+    --output-dir "$out" \
+    2>&1 | tee -a "$LOG_ROOT/strategy_b.log"
 }
 
 run_strategy_c_common() {
@@ -222,18 +218,16 @@ run_strategy_c_common() {
   local out="$RESULT_ROOT/$strategy_name"
   mkdir -p "$out"
   echo "== MagicBrush ${strategy_name} tag=$tag =="
-  for index in $RESOLVED_INDICES; do
-    "$PYTHON_BIN" framework/sourcecode/infer_strategy_c.py \
-      "${common_infer_args[@]}" \
-      --checkpoint-dir "$ckpt" \
-      --checkpoint-tag "$tag" \
-      --index "$index" \
-      --output-dir "$out" \
-      --control-conditioning-mode "$control_mode" \
-      --outer-bbox-padding "$OUTER_BBOX_PADDING" \
-      --controlnet-conditioning-scale "$CONTROLNET_CONDITIONING_SCALE" \
-      2>&1 | tee -a "$LOG_ROOT/${strategy_name}.log"
-  done
+  "$PYTHON_BIN" framework/sourcecode/infer_strategy_c.py \
+    "${common_infer_args[@]}" \
+    --checkpoint-dir "$ckpt" \
+    --checkpoint-tag "$tag" \
+    --indices "$RESOLVED_INDICES" \
+    --output-dir "$out" \
+    --control-conditioning-mode "$control_mode" \
+    --outer-bbox-padding "$OUTER_BBOX_PADDING" \
+    --controlnet-conditioning-scale "$CONTROLNET_CONDITIONING_SCALE" \
+    2>&1 | tee -a "$LOG_ROOT/${strategy_name}.log"
 }
 
 has_strategy a && run_strategy_a

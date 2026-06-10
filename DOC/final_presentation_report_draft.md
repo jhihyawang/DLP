@@ -12,12 +12,12 @@ Important result status:
 
 ```text
 PIPE A/B/C/C+ main comparison:
-  current quantitative table is a pilot/demo evaluation on test indices 0, 1, 2.
-  It should not be described as full PIPE test-set evaluation.
+  full PIPE test inference/evaluation is available for pipe_test_0 to pipe_test_751.
+  Old pilot files test_0, test_1, and test_2 still exist in the result folder, so the clean table excludes them.
 
 MagicBrush generalization:
-  full dev split evaluation has been completed.
-  A/B/C/C+ each have 528 evaluated outputs, covering indices 0-527.
+  corrected full dev split inference/evaluation is available under magicbrush_generalization_maskdiff.
+  BBoxes are derived from source-mask difference, with source-target difference as fallback.
 ```
 
 ## 1. Project Goal
@@ -162,7 +162,7 @@ img_id
 turn_index
 ```
 
-For MagicBrush, the implementation converts `mask_img` into an object mask and then computes the bbox. If a usable mask is unavailable, the implementation can derive a fallback mask from the difference between source and target images.
+For MagicBrush, the implementation now derives the object/edit mask from the difference between `source_img` and `mask_img`, then computes the bbox from that difference mask. During inspection, the original direct `mask_img` parsing was found to produce nearly full-image bbox overlays for most samples because `mask_img` is not a clean binary mask. If `mask_img` is unavailable or produces an invalid mask, the loader falls back to the source-target image difference.
 
 Implementation additions:
 
@@ -917,8 +917,8 @@ Lower is better.
 Current status:
 
 ```text
-Main PIPE and fixed-location LPIPS values use random-backbone fallback in existing summary.
-MagicBrush LPIPS values are from magicbrush_generalization_lpips_summary_metrics.csv.
+PIPE and MagicBrush LPIPS values are available in the latest evaluation CSVs.
+MagicBrush LPIPS is from the random-backbone fallback file, so it should be treated as an auxiliary trend unless standard pretrained LPIPS is available.
 ```
 
 ## 14. Current Quantitative Results
@@ -928,23 +928,25 @@ MagicBrush LPIPS values are from magicbrush_generalization_lpips_summary_metrics
 Important status:
 
 ```text
-This table is a pilot/demo evaluation only.
-It uses PIPE test indices 0, 1, 2.
-It should not be presented as full PIPE test-set evaluation.
+This table is the clean full PIPE test evaluation.
+It uses pipe_test_0 to pipe_test_751, for 752 outputs per strategy.
+Old pilot outputs test_0, test_1, and test_2 are excluded from this table.
 ```
 
-| Strategy | Inside L1 ↓ | Outside L1 ↓ | CLIP ↑ | LPIPS Fallback ↓ | Changed IoU ↑ | Changed Inside Ratio ↑ | Center Dist Norm ↓ |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| strategy_a | 0.1819 | 0.0363 | 0.2489 | 0.0480 | 0.3582 | 0.6825 | 0.0640 |
-| strategy_b | 0.1871 | 0.0071 | 0.2566 | 0.0461 | 0.3393 | 0.8983 | 0.0426 |
-| strategy_c | 0.1857 | 0.0326 | 0.2552 | 0.0457 | 0.3796 | 0.7145 | 0.0506 |
-| strategy_cplus | 0.1761 | 0.0327 | 0.2608 | 0.0429 | 0.3913 | 0.7228 | 0.0523 |
+| Strategy | Num Outputs | Inside L1 ↓ | Outside L1 ↓ | CLIP ↑ | LPIPS Whole ↓ | Changed IoU ↑ | Changed Inside Ratio ↑ | Center Dist Norm ↓ |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| strategy_a | 752 | 0.1638 | 0.0407 | 0.2488 | 0.1530 | 0.2001 | 0.3309 | 0.1540 |
+| strategy_b | 752 | 0.1669 | 0.0040 | 0.2478 | 0.0823 | 0.3621 | 0.7566 | 0.0344 |
+| strategy_c | 752 | 0.1834 | 0.0385 | 0.2520 | 0.1502 | 0.2647 | 0.4097 | 0.1383 |
+| strategy_cplus | 752 | 0.1872 | 0.0350 | 0.2503 | 0.1422 | 0.2492 | 0.4136 | 0.1350 |
 
 Observation:
 
 ```text
-C+ has the best pilot result for inside-bbox L1, CLIP, LPIPS fallback, and changed-region IoU.
-B has the lowest outside-bbox error because it strongly preserves or copies outside-bbox pixels.
+Strategy B has the strongest spatial localization and background preservation.
+It achieves the lowest outside-bbox error, highest changed-region IoU, highest changed-inside-bbox ratio, and lowest center distance.
+Strategy C has the highest CLIP score, suggesting slightly better text-image alignment.
+Strategy C+ has the lowest whole-image LPIPS among the learned ControlNet-style variants.
 ```
 
 ### 14.2 Fixed-Location Ablation
@@ -990,7 +992,7 @@ B preserves outside-bbox pixels strongly, but this also means its edit can be co
 
 ### 14.4 MagicBrush Full-Dev Generalization
 
-This is the strongest quantitative generalization result currently available.
+This is the corrected MagicBrush generalization result. The model is trained on PIPE and evaluated on the full MagicBrush dev split without MagicBrush fine-tuning. BBoxes are extracted from the difference between `source_img` and `mask_img`, with source-target difference as fallback.
 
 Evaluation set:
 
@@ -1001,22 +1003,28 @@ num outputs per strategy: 528
 total outputs: 2112
 ```
 
-| Strategy | Num Outputs | Inside L1 ↓ | Outside L1 ↓ | CLIP ↑ | LPIPS ↓ | Changed IoU ↑ | Changed Inside Ratio ↑ | Center Dist Norm ↓ |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| strategy_a | 528 | 0.3539 | 0.4038 | 0.2471 | 0.7342 | 0.8637 | 0.9980 | 0.0171 |
-| strategy_b | 528 | 0.3641 | 0.0000 | 0.2467 | 0.7345 | 0.8602 | 1.0000 | 0.0175 |
-| strategy_c | 528 | 0.0970 | 0.1081 | 0.2429 | 0.2454 | 0.1476 | 0.9989 | 0.1178 |
-| strategy_cplus | 528 | 0.0919 | 0.1858 | 0.2384 | 0.2366 | 0.1532 | 0.9986 | 0.1032 |
-
-Interpretation:
+Status:
 
 ```text
-C/C+ generalize much better than A/B in target reconstruction and perceptual similarity.
-C+ achieves the best Inside L1 and LPIPS on MagicBrush.
-B obtains Outside L1 = 0 because of its hard outside-bbox preservation constraint.
-CLIP scores are close across methods and should not be used as the only conclusion.
-Changed IoU is high for A/B because their changed region covers almost the entire large MagicBrush mask.
-C/C+ make more localized changes, so their bbox IoU can be lower even when target similarity is much better.
+Corrected mask-difference run.
+Use this table for MagicBrush generalization discussion.
+LPIPS is from the random-backbone fallback evaluation file and should be treated as an auxiliary trend.
+```
+
+| Strategy | Num Outputs | Inside L1 ↓ | Outside L1 ↓ | CLIP ↑ | LPIPS Whole ↓ | Changed IoU ↑ | Changed Inside Ratio ↑ | Center Dist Norm ↓ |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| strategy_a | 528 | 0.3595 | 0.3514 | 0.2471 | 0.2111 | 0.5242 | 0.5745 | 0.1203 |
+| strategy_b | 528 | 0.2933 | 0.0000 | 0.2422 | 0.1175 | 0.7422 | 1.0000 | 0.0196 |
+| strategy_c | 528 | 0.1573 | 0.0500 | 0.2445 | 0.0504 | 0.2151 | 0.7599 | 0.1275 |
+| strategy_cplus | 528 | 0.1605 | 0.0445 | 0.2412 | 0.0497 | 0.2200 | 0.7748 | 0.1119 |
+
+Observation:
+
+```text
+Strategy B remains the most spatially conservative method on MagicBrush.
+It preserves the outside-bbox region almost perfectly and keeps all changed pixels inside the bbox.
+Strategy C and C+ better match the target edited images, with much lower inside-bbox L1 and whole-image LPIPS than A/B.
+C+ slightly improves over C in outside-bbox error, whole-image LPIPS, changed-region IoU, changed-inside-bbox ratio, and center distance.
 ```
 
 ## 15. Qualitative Result Discussion
@@ -1061,8 +1069,9 @@ For final reporting, use the following principles:
 For the current project state:
 
 ```text
-MagicBrush full dev evaluation is fair and complete.
-PIPE main comparison is currently pilot/demo unless full test inference is rerun.
+Full PIPE test evaluation is available for 752 samples per strategy.
+Corrected MagicBrush full dev evaluation is available for 528 samples per strategy.
+Fixed-location and bbox-variation experiments are still best treated as diagnostic/qualitative ablations.
 ```
 
 ## 17. Implementation Summary
@@ -1145,7 +1154,7 @@ Differences:
 
 5. The project includes fixed-location ablation to test whether the model truly follows bbox rather than source-image priors.
 
-6. The project evaluates cross-dataset generalization on full MagicBrush dev split.
+6. The project includes a corrected MagicBrush generalization pipeline using source-mask difference based bbox extraction.
 ```
 
 ## 20. Limitations
@@ -1153,12 +1162,12 @@ Differences:
 Current limitations:
 
 ```text
-1. PIPE main A/B/C/C+ automatic table is currently only pilot/demo on three test samples.
+1. Automatic metrics cannot fully capture visual realism, object plausibility, and blending quality.
 2. Pixel metrics are imperfect because diffusion outputs are not required to match the target exactly.
 3. Changed-region IoU can be misleading when the changed region is very large or the bbox/mask is large.
 4. CLIP is global and does not directly measure bbox alignment.
 5. Strategy B outside-bbox preservation is partly enforced by hard compositing, so it is not a pure learned behavior.
-6. Full PIPE test inference may require significant GPU time.
+6. Full-split inference requires significant GPU time, especially if the model is reloaded for every image.
 7. Visual quality still needs human inspection for boundaries, shadows, and object realism.
 ```
 
@@ -1171,17 +1180,17 @@ The main findings are:
 ```text
 1. BBox guidance can be injected at several levels, but feature-level conditioning is more effective for spatial control and generalization.
 2. Strategy B preserves outside-bbox background extremely well because of hard inference constraints, but this does not necessarily imply better object generation.
-3. Strategy C and C+ provide stronger spatially conditioned generation than A/B.
-4. Strategy C+ improves the separation between object extent and edit/blending region through inner/outer conditioning.
-5. On MagicBrush full-dev generalization, C+ achieves the best target-region similarity and LPIPS among A/B/C/C+.
-6. Fixed-location ablation shows that bbox-conditioned models can respond to unseen bbox placements, though difficult locations such as bottom-right remain challenging.
+3. On the full PIPE test set, Strategy B gives the strongest localization and background preservation, while Strategy C gives the best CLIP similarity.
+4. Strategy C+ improves the separation between object extent and edit/blending region through inner/outer conditioning, and gives competitive perceptual quality.
+5. Fixed-location ablation shows that bbox-conditioned models can respond to unseen bbox placements, though difficult locations such as bottom-right remain challenging.
+6. On corrected MagicBrush generalization, C/C+ better match target edited images, while B remains the most spatially conservative method.
 ```
 
 Final takeaway:
 
 ```text
 Explicit bbox conditioning is useful for controllable object addition.
-Among the tested designs, ControlNet-style feature conditioning, especially the C+ inner/outer design, provides the strongest balance between spatial control, target similarity, and cross-dataset generalization.
+Among the tested designs, ControlNet-style feature conditioning, especially the C+ inner/outer design, provides the strongest current evidence for balancing spatial control, target similarity, and background preservation.
 ```
 
 ## 22. Suggested Final Slide Structure
@@ -1195,9 +1204,9 @@ Among the tested designs, ControlNet-style feature conditioning, especially the 
 06 Training and Inference Pipeline
 07 Ablation Study Design
 08 Evaluation Metrics
-09 PIPE Pilot Results
+09 PIPE Full-Test Results
 10 Fixed-Location Ablation Results
-11 MagicBrush Full-Dev Generalization
+11 MagicBrush Generalization Results
 12 Qualitative Demo
 13 Limitations
 14 Conclusion
